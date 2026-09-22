@@ -20,8 +20,9 @@ def load_nlp_resources():
     nltk.download('punkt', quiet=True)
     nltk.download('wordnet', quiet=True)
     
-    # Direct load since it's installed via requirements.txt
-    nlp = spacy.load("en_core_web_sm")
+    # Direct module load (Bypasses the broken symlink lookup completely)
+    import en_core_web_sm
+    nlp = en_core_web_sm.load()
     
     return nlp, PorterStemmer()
 
