@@ -6,20 +6,17 @@ import pandas as pd
 import plotly.express as px
 import re
 import spacy
-from spacy import displacy
 import nltk
 from nltk.stem import PorterStemmer
+import numpy as np
 
 # -----------------------------------------
-# 1. CLOUD-SAFE RESOURCE INITIALIZATION
+# 1. INITIALIZATION & ARTIFACT LOADING
 # -----------------------------------------
 @st.cache_resource
 def load_nlp_resources():
-    # NLTK setup
     nltk.download('punkt', quiet=True)
     nltk.download('wordnet', quiet=True)
-    
-    # spaCy setup with auto-download fallback
     try:
         nlp = spacy.load("en_core_web_sm")
     except OSError:
@@ -27,36 +24,30 @@ def load_nlp_resources():
         import sys
         subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
         nlp = spacy.load("en_core_web_sm")
-    
     return nlp, PorterStemmer()
 
 nlp, stemmer = load_nlp_resources()
 
-# -----------------------------------------
-# 2. MODEL ARTIFACT LOADING
-# -----------------------------------------
 @st.cache_resource
 def load_models():
     base_dir = "model_artifacts"
     try:
         clf = joblib.load(os.path.join(base_dir, "clause_classifier.pkl"))
         tfidf = joblib.load(os.path.join(base_dir, "tfidf_vectorizer.pkl"))
-        le = joblib.load(os.path.join(base_dir, "label_encoder.pkl"))
-        
+        mlb = joblib.load(os.path.join(base_dir, "mlb_encoder.pkl")) # Updated to MLB
         with open(os.path.join(base_dir, "evaluation_metrics.json"), "r") as f:
             metrics = json.load(f)
         with open(os.path.join(base_dir, "top_keywords.json"), "r") as f:
             keywords = json.load(f)
-            
-        return clf, tfidf, le, metrics, keywords
+        return clf, tfidf, mlb, metrics, keywords
     except FileNotFoundError:
-        st.error("Model artifacts missing. Please run `train_model.py` first.")
+        st.error("Model artifacts missing. Run `train_model.py` first.")
         st.stop()
 
-clf, tfidf, le, metrics, keywords = load_models()
+clf, tfidf, mlb, metrics, keywords = load_models()
 
 # -----------------------------------------
-# 3. SESSION STATE ROUTING
+# 2. SESSION STATE & ROUTING
 # -----------------------------------------
 if "analyzed" not in st.session_state:
     st.session_state.analyzed = False
@@ -68,161 +59,148 @@ def trigger_analysis():
         st.session_state.raw_text = st.session_state.text_input
         st.session_state.analyzed = True
     else:
-        st.warning("Please enter a valid contract snippet (min 10 characters).")
+        st.warning("Please enter a valid contract snippet.")
 
 def reset_app():
     st.session_state.analyzed = False
     st.session_state.raw_text = ""
 
+# Helper: Inline Highlighting
+def highlight_text(text, patterns, color, label=""):
+    for p in patterns:
+        replacement = f'<span style="background-color:{color}; padding:2px 4px; border-radius:4px; font-weight:bold; color:black;">\\1 <span style="font-size:0.7em; color:#333;">[{label}]</span></span>'
+        text = re.sub(f'({p})', replacement, text, flags=re.IGNORECASE)
+    return text
+
 # -----------------------------------------
-# 4. VIEW: LANDING PAGE
+# 3. VIEWS
 # -----------------------------------------
 def render_landing_page():
     st.title("⚖️ JurisParse AI")
     st.markdown("### End-to-End NLP Pipeline for Legal Clause Audit & Risk Detection")
-    st.markdown("Enter a raw contract snippet below to begin morphological, syntactic, and entity analysis.")
     
     sample_clauses = {
         "Sample 1: Indemnification": "The Contractor shall indemnify and hold harmless the Client from any damages, liabilities, or financial losses arising from breach of this Agreement.",
-        "Sample 2: Termination": "Either party may terminate this Contract by providing a 30-day written notice to the other party, specifying the effective date of termination.",
-        "Sample 3: Governing Law": "This Agreement shall be governed by and construed in accordance with the laws of the State of California, without regard to its conflict of law provisions."
+        "Sample 2: Termination": "Either party may terminate this Contract by providing a thirty (30) days prior written notice to the other party. In the event of a material breach, the non-breaching Party may terminate immediately.",
+        "Sample 3: Governing Law": "This Agreement and any dispute or claim arising out of or in connection with it shall be governed by and construed in accordance with the laws of the State of Delaware, without giving effect to any choice or conflict of law provision."
     }
     
-    selected_sample = st.selectbox("Or choose a pre-loaded sample:", ["-- Select Sample --"] + list(sample_clauses.keys()))
-    
-    default_text = ""
-    if selected_sample != "-- Select Sample --":
-        default_text = sample_clauses[selected_sample]
+    selected_sample = st.selectbox("Choose a pre-loaded sample:", ["-- Select Sample --"] + list(sample_clauses.keys()))
+    default_text = sample_clauses.get(selected_sample, "")
 
     st.text_area("Contract / Clause Text", value=default_text, height=200, key="text_input")
     st.button("Analyze Contract 🚀", on_click=trigger_analysis, type="primary")
 
-# -----------------------------------------
-# 5. VIEW: DASHBOARD (MULTI-TAB)
-# -----------------------------------------
 def render_dashboard():
     st.button("← Analyze Another Contract", on_click=reset_app)
-    
     text = st.session_state.raw_text
     doc = nlp(text)
     
-    st.markdown("### 📊 JurisParse AI Dashboard")
-    st.info(f"**Input Snippet:** {text[:150]}...")
-    
-    # Core Classification (Used across tabs)
+    # Core Classification (Multi-Label Logic)
     vec = tfidf.transform([text])
-    pred_idx = clf.predict(vec)[0]
-    pred_class = le.inverse_transform([pred_idx])[0]
     probs = clf.predict_proba(vec)[0]
-
+    
+    # Thresholding for Multi-Label
+    threshold = 0.25
+    pred_indices = np.where(probs > threshold)[0]
+    if len(pred_indices) == 0:
+        pred_indices = [np.argmax(probs)] # Fallback if none exceed threshold
+        
+    detected_classes = mlb.classes_[pred_indices]
+    
+    st.markdown("### 📊 JurisParse AI Dashboard")
+    
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "1. Preprocessing", "2. Feature Mining", "3. Classifier", "4. Syntactic Structure", "5. Entity & Bot"
+        "1. Exec Summary", "2. Vagueness & Risks", "3. Entities", "4. Classifier Insights", "5. Feature Mining"
     ])
     
-    # --- TAB 1: TEXT PREPROCESSING ---
+    # --- TAB 1: EXECUTIVE SUMMARY ---
     with tab1:
-        st.header("Morphological Analysis")
-        # Jargon Normalizer Regex
-        norm_text = re.sub(r'(?i)IN WITNESS WHEREOF|hereinafter|thereto|hereby', '[LEGALESE REMOVED]', text)
-        norm_text = re.sub(r'\d+\.\d+|\([a-z]\)', '[SEC_NUM]', norm_text)
+        st.header("Clause Summary & Audit")
+        st.success(f"**Detected Clause Typologies:** {', '.join(detected_classes)}")
         
-        st.markdown("**Regex Legal Jargon Normalization:**")
-        st.write(norm_text)
+        # Inline Highlighting for Summary
+        highlighted_text = text
+        highlighted_text = highlight_text(highlighted_text, [r'\b(?:thirty|sixty|ninety)?\s*\(\d+\)\s*(?:days|months|years)\b', r'\b\d+\s*(?:days|months|years)\b'], "#81c784", "TIMELINE")
+        highlighted_text = highlight_text(highlighted_text, [r'terminate', r'termination', r'indemnify', r'hold harmless'], "#e57373", "TRIGGER")
         
-        st.markdown("**Stemming vs. Lemmatization Comparator:**")
-        tokens = [token for token in doc if not token.is_punct and not token.is_space]
-        comparison_data = {
-            "Original Token": [t.text for t in tokens],
-            "Porter Stemmer (NLTK)": [stemmer.stem(t.text) for t in tokens],
-            "Morphological Lemma (spaCy)": [t.lemma_ for t in tokens],
-            "POS Tag": [t.pos_ for t in tokens]
-        }
-        st.dataframe(pd.DataFrame(comparison_data), use_container_width=True)
+        st.markdown("**Actionable Text Audit:**")
+        st.markdown(f"<div style='line-height:1.8; font-size:1.1em;'>{highlighted_text}</div>", unsafe_allow_html=True)
+        
+        with st.expander("🛠️ View Technical NLP Debugging Metrics (Stemming & POS)"):
+            tokens = [token for token in doc if not token.is_punct and not token.is_space]
+            comparison_data = {
+                "Original Token": [t.text for t in tokens],
+                "Porter Stemmer": [stemmer.stem(t.text) for t in tokens],
+                "Lemma": [t.lemma_ for t in tokens],
+                "POS": [t.pos_ for t in tokens]
+            }
+            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True)
 
-    # --- TAB 2: FEATURE ENGINEERING ---
-    with tab2:
-        st.header("Domain Keyword Mining")
-        st.markdown(f"**Top TF-IDF Keywords for Detected Category: `{pred_class}`**")
+    # --- TAB 2: VAGUENESS & LEGAL RISK ---
+    with tab4: # Swapped conceptual position for UI flow
+        st.header("Legal Ambiguity & Vagueness Detector")
+        st.info("Highlights undefined legal standards, discretionary boilerplate, and subjective qualifiers.")
         
-        class_keywords = keywords.get(pred_class, [])
-        # Mocking weights for visualization purposes based on order
-        weights = [1.0 - (i * 0.08) for i in range(len(class_keywords))]
+        ambiguous_patterns = [
+            r"material breach", r"reasonable efforts", r"sole discretion", 
+            r"at any time", r"without cause", r"best efforts", r"timely manner"
+        ]
         
-        df_keywords = pd.DataFrame({"Keyword": class_keywords, "TF-IDF Weight": weights})
-        fig = px.bar(df_keywords, x="TF-IDF Weight", y="Keyword", orientation='h', 
-                     title=f"Term Importance for {pred_class}", color="TF-IDF Weight",
-                     color_continuous_scale="Blues")
-        fig.update_layout(yaxis={'categoryorder':'total ascending'})
-        st.plotly_chart(fig, use_container_width=True)
-
-    # --- TAB 3: CLAUSE CLASSIFIER ---
-    with tab3:
-        st.header("Multi-Class Legal Classifier")
-        st.success(f"**Predicted Clause Category:** {pred_class}")
+        risk_text = text
+        risk_count = 0
+        for pattern in ambiguous_patterns:
+            if re.search(pattern, risk_text, re.IGNORECASE):
+                risk_text = highlight_text(risk_text, [pattern], "#ffd54f", "VAGUE/AMBIGUOUS")
+                risk_count += 1
+                
+        col1, col2 = st.columns(2)
+        col1.metric("Ambiguous Terms Detected", risk_count)
         
-        # Probability Distribution
-        prob_df = pd.DataFrame({
-            "Clause Category": le.classes_,
-            "Probability": probs
-        }).sort_values(by="Probability", ascending=False)
-        
-        fig2 = px.bar(prob_df, x="Probability", y="Clause Category", orientation='h',
-                      title="Prediction Confidence Scores", color="Probability")
-        st.plotly_chart(fig2, use_container_width=True)
-        
-        with st.expander("View Global Model Evaluation Metrics"):
-            st.metric("Validation Accuracy", f"{metrics['accuracy']*100:.2f}%")
-            st.json(metrics['classification_report'])
-
-    # --- TAB 4: SYNTACTIC AMBIGUITY ---
-    with tab4:
-        st.header("Syntactic Structure & Ambiguity")
-        
-        # Rule-based linguistic checks
         has_passive = any(tok.dep_ == "auxpass" for tok in doc)
-        has_subj = any("subj" in tok.dep_ for tok in doc)
-        has_obj = any("obj" in tok.dep_ for tok in doc)
+        col2.metric("Passive Voice Detected", "Yes ⚠️" if has_passive else "No ✅")
         
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Passive Voice Detected", "Yes ⚠️" if has_passive else "No ✅")
-        col2.metric("Missing SVO Structure", "Yes ⚠️" if not (has_subj and has_obj) else "No ✅")
-        col3.metric("Avg Sentence Length", f"{len(list(doc))/len(list(doc.sents)):.1f} tokens")
-        
-        st.markdown("**Dependency Parse Tree:**")
-        html = displacy.render(doc, style="dep", page=False)
-        st.components.v1.html(html, height=400, scrolling=True)
+        st.markdown("**Vagueness Audit:**")
+        st.markdown(f"<div style='line-height:1.8; font-size:1.1em; padding:15px; border:1px solid #ddd; border-radius:5px;'>{risk_text}</div>", unsafe_allow_html=True)
 
-    # --- TAB 5: ENTITY & QA BOT ---
+    # --- TAB 3: ENTITIES ---
     with tab5:
-        st.header("Entity Extractor & Query Bot")
+        st.header("Legal Entity Extractor")
         
-        # NER Extraction
-        target_labels = ['ORG', 'DATE', 'MONEY', 'GPE']
-        entities = [{"Entity": ent.text, "Label": ent.label_} for ent in doc.ents if ent.label_ in target_labels]
+        # Regex to repair Date extraction
+        dates = re.findall(r'\b(?:[a-zA-Z-]+\s+)?\(\d+\)\s*(?:days|months|years)\b|\b\d+\s*(?:days|months|years)\b', text, re.IGNORECASE)
+        entities = [{"Entity": d, "Label": "NOTICE PERIOD"} for d in dates]
+        
+        target_labels = ['ORG', 'MONEY', 'GPE']
+        for ent in doc.ents:
+            if ent.label_ in target_labels and ent.text.lower() != "party": # Exclude generic 'Party' misclassification
+                entities.append({"Entity": ent.text, "Label": ent.label_})
         
         if entities:
             st.dataframe(pd.DataFrame(entities), use_container_width=True)
         else:
-            st.info("No primary legal entities (ORG, DATE, MONEY, GPE) detected in this snippet.")
-            
-        st.markdown("---")
-        st.markdown("### 🤖 Regulatory QA Bot")
-        user_q = st.text_input("Ask a question about this clause (e.g., 'What is the notice period?', 'Who is liable?'):")
-        
-        if user_q:
-            q = user_q.lower()
-            if re.search(r'notice|how many days|terminate', q):
-                st.info("**Bot Answer:** Based on standard contract structures, look for terms accompanied by 'days' or 'written notice' in the text.")
-            elif re.search(r'liab|indemn|who pays', q):
-                st.info("**Bot Answer:** Liability usually falls on the party mentioned directly preceding 'shall indemnify' or 'agrees to hold harmless'.")
-            elif re.search(r'law|govern|jurisdiction', q):
-                st.info("**Bot Answer:** Governing law is typically identified by GPE (Geopolitical Entity) tags in the entity extractor above.")
-            else:
-                st.warning("Bot: I couldn't map that query to a specific legal heuristic. Try asking about 'notice periods', 'liability', or 'governing law'.")
+            st.info("No primary legal entities detected.")
 
-# -----------------------------------------
-# 6. APP EXECUTION
-# -----------------------------------------
+    # --- TAB 4: CLASSIFIER INSIGHTS ---
+    with tab3:
+        st.header("Multi-Label Model Confidence")
+        prob_df = pd.DataFrame({"Clause Category": mlb.classes_, "Probability": probs}).sort_values(by="Probability", ascending=False)
+        fig2 = px.bar(prob_df, x="Probability", y="Clause Category", orientation='h', title="Prediction Confidence Scores", color="Probability")
+        fig2.add_vline(x=threshold, line_dash="dash", line_color="red", annotation_text=f"Threshold ({threshold})")
+        st.plotly_chart(fig2, use_container_width=True)
+
+    # --- TAB 5: FEATURE MINING ---
+    with tab2:
+        st.header("Domain Keyword Mining")
+        primary_class = detected_classes[0]
+        st.markdown(f"**Top TF-IDF Keywords for Primary Category: `{primary_class}`**")
+        class_keywords = keywords.get(primary_class, [])
+        weights = [1.0 - (i * 0.08) for i in range(len(class_keywords))]
+        df_keywords = pd.DataFrame({"Keyword": class_keywords, "TF-IDF Weight": weights})
+        fig = px.bar(df_keywords, x="TF-IDF Weight", y="Keyword", orientation='h', color="TF-IDF Weight", color_continuous_scale="Blues")
+        fig.update_layout(yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig, use_container_width=True)
+
 if __name__ == "__main__":
     st.set_page_config(page_title="JurisParse AI", page_icon="⚖️", layout="wide")
     if not st.session_state.analyzed:
