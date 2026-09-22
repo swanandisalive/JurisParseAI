@@ -19,9 +19,14 @@ def load_nlp_resources():
     nltk.download('punkt', quiet=True)
     nltk.download('wordnet', quiet=True)
     
-    # Direct spaCy model import (Bypasses Streamlit symlink errors)
-    import en_core_web_sm
-    nlp = en_core_web_sm.load()
+    # Cloud-safe spaCy auto-loader (handles Streamlit Cloud environments cleanly)
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except OSError:
+        import subprocess
+        import sys
+        subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+        nlp = spacy.load("en_core_web_sm")
     
     return nlp, PorterStemmer()
 
@@ -33,7 +38,7 @@ def load_models():
     try:
         clf = joblib.load(os.path.join(base_dir, "clause_classifier.pkl"))
         tfidf = joblib.load(os.path.join(base_dir, "tfidf_vectorizer.pkl"))
-        mlb = joblib.load(os.path.join(base_dir, "mlb_encoder.pkl")) # MLB setup
+        mlb = joblib.load(os.path.join(base_dir, "mlb_encoder.pkl")) # MLB multi-label setup
         with open(os.path.join(base_dir, "evaluation_metrics.json"), "r") as f:
             metrics = json.load(f)
         with open(os.path.join(base_dir, "top_keywords.json"), "r") as f:
