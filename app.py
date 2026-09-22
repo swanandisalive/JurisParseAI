@@ -13,22 +13,19 @@ from nltk.stem import PorterStemmer
 # -----------------------------------------
 # 1. INITIALIZATION & ARTIFACT LOADING
 # -----------------------------------------
+
 @st.cache_resource
 def load_nlp_resources():
     # NLTK setup
     nltk.download('punkt', quiet=True)
     nltk.download('wordnet', quiet=True)
     
-    # Cloud-safe spaCy auto-loader (handles Streamlit Cloud environments cleanly)
-    try:
-        nlp = spacy.load("en_core_web_sm")
-    except OSError:
-        import subprocess
-        import sys
-        subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
-        nlp = spacy.load("en_core_web_sm")
+    # Direct load since it's installed via requirements.txt
+    nlp = spacy.load("en_core_web_sm")
     
     return nlp, PorterStemmer()
+
+nlp, stemmer = load_nlp_resources()
 
 nlp, stemmer = load_nlp_resources()
 
