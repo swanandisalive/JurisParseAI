@@ -3,27 +3,26 @@ import os
 import json
 import joblib
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import re
 import spacy
 import nltk
 from nltk.stem import PorterStemmer
-import numpy as np
 
 # -----------------------------------------
 # 1. INITIALIZATION & ARTIFACT LOADING
 # -----------------------------------------
 @st.cache_resource
 def load_nlp_resources():
+    # NLTK setup
     nltk.download('punkt', quiet=True)
     nltk.download('wordnet', quiet=True)
-    try:
-        nlp = spacy.load("en_core_web_sm")
-    except OSError:
-        import subprocess
-        import sys
-        subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
-        nlp = spacy.load("en_core_web_sm")
+    
+    # Direct spaCy model import (Bypasses Streamlit symlink errors)
+    import en_core_web_sm
+    nlp = en_core_web_sm.load()
+    
     return nlp, PorterStemmer()
 
 nlp, stemmer = load_nlp_resources()
@@ -34,7 +33,7 @@ def load_models():
     try:
         clf = joblib.load(os.path.join(base_dir, "clause_classifier.pkl"))
         tfidf = joblib.load(os.path.join(base_dir, "tfidf_vectorizer.pkl"))
-        mlb = joblib.load(os.path.join(base_dir, "mlb_encoder.pkl")) # Updated to MLB
+        mlb = joblib.load(os.path.join(base_dir, "mlb_encoder.pkl")) # MLB setup
         with open(os.path.join(base_dir, "evaluation_metrics.json"), "r") as f:
             metrics = json.load(f)
         with open(os.path.join(base_dir, "top_keywords.json"), "r") as f:
@@ -138,7 +137,7 @@ def render_dashboard():
             st.dataframe(pd.DataFrame(comparison_data), use_container_width=True)
 
     # --- TAB 2: VAGUENESS & LEGAL RISK ---
-    with tab4: # Swapped conceptual position for UI flow
+    with tab2: 
         st.header("Legal Ambiguity & Vagueness Detector")
         st.info("Highlights undefined legal standards, discretionary boilerplate, and subjective qualifiers.")
         
@@ -164,7 +163,7 @@ def render_dashboard():
         st.markdown(f"<div style='line-height:1.8; font-size:1.1em; padding:15px; border:1px solid #ddd; border-radius:5px;'>{risk_text}</div>", unsafe_allow_html=True)
 
     # --- TAB 3: ENTITIES ---
-    with tab5:
+    with tab3:
         st.header("Legal Entity Extractor")
         
         # Regex to repair Date extraction
@@ -182,7 +181,7 @@ def render_dashboard():
             st.info("No primary legal entities detected.")
 
     # --- TAB 4: CLASSIFIER INSIGHTS ---
-    with tab3:
+    with tab4:
         st.header("Multi-Label Model Confidence")
         prob_df = pd.DataFrame({"Clause Category": mlb.classes_, "Probability": probs}).sort_values(by="Probability", ascending=False)
         fig2 = px.bar(prob_df, x="Probability", y="Clause Category", orientation='h', title="Prediction Confidence Scores", color="Probability")
@@ -190,7 +189,7 @@ def render_dashboard():
         st.plotly_chart(fig2, use_container_width=True)
 
     # --- TAB 5: FEATURE MINING ---
-    with tab2:
+    with tab5:
         st.header("Domain Keyword Mining")
         primary_class = detected_classes[0]
         st.markdown(f"**Top TF-IDF Keywords for Primary Category: `{primary_class}`**")
