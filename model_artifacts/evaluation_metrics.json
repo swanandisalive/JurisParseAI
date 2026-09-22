@@ -1,0 +1,66 @@
+{
+    "accuracy": 0.9897159647404505,
+    "classes": [
+        "Counterparts",
+        "Entire Agreements",
+        "Governing Laws",
+        "Notices",
+        "Severability"
+    ],
+    "classification_report": {
+        "Counterparts": {
+            "precision": 1.0,
+            "recall": 0.9953379953379954,
+            "f1-score": 0.9976635514018691,
+            "support": 429.0
+        },
+        "Entire Agreements": {
+            "precision": 0.989769820971867,
+            "recall": 0.9948586118251928,
+            "f1-score": 0.9923076923076923,
+            "support": 389.0
+        },
+        "Governing Laws": {
+            "precision": 1.0,
+            "recall": 0.9898785425101214,
+            "f1-score": 0.9949135300101729,
+            "support": 494.0
+        },
+        "Notices": {
+            "precision": 0.9974683544303797,
+            "recall": 0.9899497487437185,
+            "f1-score": 0.9936948297604036,
+            "support": 398.0
+        },
+        "Severability": {
+            "precision": 0.9821958456973294,
+            "recall": 0.9969879518072289,
+            "f1-score": 0.9895366218236173,
+            "support": 332.0
+        },
+        "micro avg": {
+            "precision": 0.9946051986267779,
+            "recall": 0.9931439764936337,
+            "f1-score": 0.9938740504778241,
+            "support": 2042.0
+        },
+        "macro avg": {
+            "precision": 0.9938868042199154,
+            "recall": 0.9934025700448516,
+            "f1-score": 0.9936232450607511,
+            "support": 2042.0
+        },
+        "weighted avg": {
+            "precision": 0.9946630196830857,
+            "recall": 0.9931439764936337,
+            "f1-score": 0.9938831245711074,
+            "support": 2042.0
+        },
+        "samples avg": {
+            "precision": 0.9914299706170421,
+            "recall": 0.9931439764936337,
+            "f1-score": 0.9920013059092392,
+            "support": 2042.0
+        }
+    }
+}
